@@ -71,6 +71,13 @@ jobs:
                   print("revoked", c["id"], dr.status_code)
           EOF
 
+      # 新增 App Groups 后逼云签名重建含 App Group 的托管 profile（见脚本头注释）
+      - name: Reset stale managed provisioning profiles
+        run: |
+          /tmp/certclean/bin/pip install --quiet 'pyjwt[crypto]' requests
+          /tmp/certclean/bin/python ios/ci_reset_managed_profiles.py \
+            "${{ secrets.ASC_KEY_ID }}" "${{ secrets.ASC_ISSUER_ID }}" com.weavejam.pdfcast
+
       - name: Archive (cloud managed signing)
         run: |
           cd ios
