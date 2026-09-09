@@ -157,15 +157,21 @@ class _RemotePageState extends State<RemotePage> {
             const Text('推送中…',
                 style: TextStyle(
                     fontSize: 12, color: CupertinoColors.systemGrey)),
-          ] else if (err != null)
+          ] else if (err != null) ...[
             Flexible(
               child: Text(err,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                       fontSize: 12, color: CupertinoColors.destructiveRed)),
-            )
-          else
+            ),
+            CupertinoButton(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 0),
+              onPressed: _session.repush,
+              child: const Text('重试', style: TextStyle(fontSize: 12)),
+            ),
+          ] else
             Text('${_session.page + 1} / ${doc.pageCount}',
                 style: const TextStyle(
                     fontSize: 12, color: CupertinoColors.systemGrey)),
@@ -243,6 +249,29 @@ class _RemotePageState extends State<RemotePage> {
     );
   }
 
+  void _pickRotation() {
+    showCupertinoModalPopup(
+      context: context,
+      builder: (ctx) => CupertinoActionSheet(
+        title: const Text('电视画面旋转'),
+        actions: [
+          for (var q = 0; q < 4; q++)
+            CupertinoActionSheetAction(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _session.setRotation(q);
+              },
+              child: Text(_session.quarterTurns == q ? '✓ ${q * 90}°' : '${q * 90}°'),
+            ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('取消'),
+        ),
+      ),
+    );
+  }
+
   Widget _modeAndTimer() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -253,15 +282,34 @@ class _RemotePageState extends State<RemotePage> {
               const Text('电视画面', style: TextStyle(fontSize: 13)),
               const SizedBox(width: 12),
               Expanded(
-                child: CupertinoSlidingSegmentedControl<TvMode>(
-                  groupValue: _session.mode,
+                child: CupertinoSlidingSegmentedControl<TvLayout>(
+                  groupValue: _session.layout,
                   children: {
-                    for (final m in TvMode.values)
-                      m: Text(m.label, style: const TextStyle(fontSize: 13)),
+                    for (final l in TvLayout.values)
+                      l: Text(l.label, style: const TextStyle(fontSize: 13)),
                   },
-                  onValueChanged: (m) {
-                    if (m != null) _session.setMode(m);
+                  onValueChanged: (l) {
+                    if (l != null) _session.setLayout(l);
                   },
+                ),
+              ),
+              const SizedBox(width: 12),
+              CupertinoButton(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                minimumSize: const Size(0, 0),
+                color: CupertinoColors.tertiarySystemFill,
+                borderRadius: BorderRadius.circular(8),
+                onPressed: _pickRotation,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('旋转 ${_session.quarterTurns * 90}°',
+                        style: const TextStyle(
+                            fontSize: 13, color: CupertinoColors.label)),
+                    const Icon(CupertinoIcons.chevron_down,
+                        size: 14, color: CupertinoColors.systemGrey),
+                  ],
                 ),
               ),
             ],

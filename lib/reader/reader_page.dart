@@ -28,7 +28,13 @@ class _ReaderPageState extends State<ReaderPage> {
   @override
   void initState() {
     super.initState();
+    CastSession.i.addListener(_onSession);
     _open();
+  }
+
+  void _onSession() {
+    // 投屏主按钮的文案随会话状态切换
+    if (mounted) setState(() {});
   }
 
   Future<void> _open() async {
@@ -55,6 +61,7 @@ class _ReaderPageState extends State<ReaderPage> {
 
   @override
   void dispose() {
+    CastSession.i.removeListener(_onSession);
     _pc?.dispose();
     final doc = _doc;
     if (doc != null) {
@@ -71,13 +78,16 @@ class _ReaderPageState extends State<ReaderPage> {
   Future<void> _cast() async {
     final doc = _doc;
     if (doc == null) return;
-    await showCastSheet(
-      context,
-      doc: doc,
-      docName: widget.name,
-      startPage: _page,
-      onCasting: () {},
-    );
+    // 已在投本文档：不再弹设备面板，直接回遥控页
+    if (!(CastSession.i.active && CastSession.i.doc?.id == doc.id)) {
+      await showCastSheet(
+        context,
+        doc: doc,
+        docName: widget.name,
+        startPage: _page,
+        onCasting: () {},
+      );
+    }
     if (!mounted) return;
     if (CastSession.i.active && CastSession.i.doc?.id == doc.id) {
       await Navigator.of(context).push(
@@ -105,11 +115,6 @@ class _ReaderPageState extends State<ReaderPage> {
       navigationBar: CupertinoNavigationBar(
         middle: Text(widget.name,
             maxLines: 1, overflow: TextOverflow.ellipsis),
-        trailing: CupertinoButton(
-          padding: EdgeInsets.zero,
-          onPressed: doc == null ? null : _cast,
-          child: const Icon(CupertinoIcons.tv),
-        ),
       ),
       child: SafeArea(
         child: _error != null
@@ -132,6 +137,27 @@ class _ReaderPageState extends State<ReaderPage> {
                           '${_page + 1} / ${doc.pageCount}',
                           style: const TextStyle(
                               fontSize: 13, color: CupertinoColors.systemGrey),
+                        ),
+                      ),
+                      // 投屏是本 App 的核心动作，给显眼的主按钮
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: CupertinoButton.filled(
+                            onPressed: _cast,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(CupertinoIcons.tv, size: 20),
+                                const SizedBox(width: 8),
+                                Text(CastSession.i.active &&
+                                        CastSession.i.doc?.id == doc.id
+                                    ? '回到投屏遥控'
+                                    : '投屏到电视'),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ],

@@ -1,21 +1,16 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'pdf_doc.dart';
 
-/// 电视横竖屏适配模式
-enum TvMode {
-  /// 原比例单页，电视自己居中留边
-  fit('单页'),
-
-  /// 旋转 90°：竖版 PDF 铺满横屏电视（或反之）
-  rotate90('旋转90°'),
-
-  /// 双页并排合成一张横图：横屏电视看竖版 PDF，像摊开的书
+/// 电视版式：单页 / 双页并排（像摊开的书）。旋转角度独立于版式。
+enum TvLayout {
+  single('单页'),
   spread('双页');
 
   final String label;
-  const TvMode(this.label);
+  const TvLayout(this.label);
 }
 
 /// 合成结果的原始 RGBA 像素（供纯 Dart H.264 编码器使用）
@@ -26,14 +21,21 @@ class ComposedRgba {
   ComposedRgba(this.rgba, this.width, this.height);
 }
 
-/// 按电视模式合成页面并输出 RGBA 像素（投屏走 MP4 编码，不经 PNG）
+/// 按电视版式合成页面、按 [quarterTurns]×90° 顺时针旋转，输出 RGBA 像素
 Future<ComposedRgba> composePageRgba(
   PdfDoc doc,
   int page,
-  TvMode mode, {
+  TvLayout layout,
+  int quarterTurns, {
   double longEdge = 1920,
 }) async {
-  final image = await _composeImage(doc, page, mode, longEdge: longEdge);
+  var image = await _composeImage(doc, page, layout, longEdge: longEdge);
+  final q = quarterTurns & 3;
+  if (q != 0) {
+    final rotated = await _rotateQuarters(image, q);
+    image.dispose();
+    image = rotated;
+  }
   try {
     final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
     return ComposedRgba(
@@ -46,20 +48,13 @@ Future<ComposedRgba> composePageRgba(
 Future<ui.Image> _composeImage(
   PdfDoc doc,
   int page,
-  TvMode mode, {
+  TvLayout layout, {
   double longEdge = 1920,
 }) async {
-  switch (mode) {
-    case TvMode.fit:
+  switch (layout) {
+    case TvLayout.single:
       return doc.renderImage(page, longEdge: longEdge);
-    case TvMode.rotate90:
-      final img = await doc.renderImage(page, longEdge: longEdge);
-      try {
-        return await _rotate90(img);
-      } finally {
-        img.dispose();
-      }
-    case TvMode.spread:
+    case TvLayout.spread:
       final left = await doc.renderImage(page, longEdge: longEdge);
       ui.Image? right;
       if (page + 1 < doc.pageCount) {
@@ -74,13 +69,16 @@ Future<ui.Image> _composeImage(
   }
 }
 
-Future<ui.Image> _rotate90(ui.Image src) {
+Future<ui.Image> _rotateQuarters(ui.Image src, int q) {
+  final w = q.isOdd ? src.height : src.width;
+  final h = q.isOdd ? src.width : src.height;
   final rec = ui.PictureRecorder();
   final canvas = ui.Canvas(rec);
-  canvas.translate(src.height.toDouble(), 0);
-  canvas.rotate(1.5707963267948966);
+  canvas.translate(w / 2, h / 2);
+  canvas.rotate(q * math.pi / 2);
+  canvas.translate(-src.width / 2, -src.height / 2);
   canvas.drawImage(src, ui.Offset.zero, ui.Paint());
-  return rec.endRecording().toImage(src.height, src.width);
+  return rec.endRecording().toImage(w, h);
 }
 
 /// 两页等高并排（末页落单时右侧留白），白底

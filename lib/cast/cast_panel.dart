@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:dlna_dart/dlna.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 
 import '../pdf/pdf_doc.dart';
 import 'cast_session.dart';
@@ -50,6 +52,8 @@ class _CastSheetState extends State<_CastSheet> {
   List<DLNADevice> _devices = const [];
   StreamSubscription? _sub;
   bool _connecting = false;
+  bool _slowHint = false; // 搜了一阵还没结果，提示检查本地网络权限
+  Timer? _slowTimer;
   String? _error;
 
   @override
@@ -57,6 +61,9 @@ class _CastSheetState extends State<_CastSheet> {
     super.initState();
     CastSession.i.addListener(_onSession);
     _search();
+    _slowTimer = Timer(const Duration(seconds: 6), () {
+      if (mounted && _devices.isEmpty) setState(() => _slowHint = true);
+    });
   }
 
   void _onSession() {
@@ -64,6 +71,14 @@ class _CastSheetState extends State<_CastSheet> {
   }
 
   Future<void> _search() async {
+    if (Platform.isIOS) {
+      // iOS 直接发 UDP 组播时系统可能静默拦截且不弹「本地网络」授权框，
+      // 先用原生 Bonjour 浏览强制触发弹窗（见 AppDelegate warmupLocalNetwork）
+      try {
+        await const MethodChannel('pdfcast/share')
+            .invokeMethod('warmupLocalNetwork');
+      } catch (_) {}
+    }
     DeviceManager dm;
     try {
       // reusePort：B 站等 app 投屏时会占住 SSDP 的 1900 端口，必须共享绑定
@@ -86,6 +101,7 @@ class _CastSheetState extends State<_CastSheet> {
   @override
   void dispose() {
     CastSession.i.removeListener(_onSession);
+    _slowTimer?.cancel();
     _sub?.cancel();
     _extraSearch.stop();
     _manager.stop();
@@ -147,7 +163,11 @@ class _CastSheetState extends State<_CastSheet> {
                       ? const Text('正在搜索其他可投屏的设备…')
                       : const Text('点其他设备可直接换过去接着看'))
                   : _devices.isEmpty
-                      ? const Text('正在搜索局域网里的电视/投屏设备…\n请确认手机和电视连着同一个 Wi-Fi')
+                      ? Text(_slowHint && Platform.isIOS
+                          ? '还没搜到设备。请到 iPhone 的\n设置 > 隐私与安全性 > 本地网络\n确认已允许「PDF投屏」，然后回来重新搜索；\n并确认手机和电视连着同一个 Wi-Fi'
+                          : _slowHint
+                              ? '还没搜到设备。请确认本机和电视连着同一个网络，\n且防火墙未拦截 UDP 组播'
+                              : '正在搜索局域网里的电视/投屏设备…\n请确认手机和电视连着同一个 Wi-Fi')
                       : null,
       actions: [
         for (final d in others)

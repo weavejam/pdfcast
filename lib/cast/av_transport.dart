@@ -42,11 +42,13 @@ class AvTransport {
       req.headers.set('Connection', 'close');
       req.headers.contentType = ContentType('text', 'xml', charset: 'utf-8');
       req.add(utf8.encode(envelope));
-      final resp = await req.close().timeout(const Duration(seconds: 8));
+      // 有电视处理 SetAVTransportURI 要十几秒才回响应（命令其实已生效），
+      // 超时给足；真正联不通由 5s connectionTimeout 兜底
+      final resp = await req.close().timeout(const Duration(seconds: 20));
       final text = await resp
           .transform(utf8.decoder)
           .join()
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 10));
       if (resp.statusCode >= 400 || text.contains('Fault')) {
         throw Exception('$action 失败：HTTP ${resp.statusCode}');
       }

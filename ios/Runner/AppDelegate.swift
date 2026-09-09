@@ -6,6 +6,8 @@ import UIKit
   private var channel: FlutterMethodChannel?
   // 冷启动时 Flutter 还没起来，先缓存路径，等 Dart 调 getInitialPdf 取走
   private var pendingPdfPath: String?
+  // 持有引用防释放；只为触发系统「本地网络」授权弹窗
+  private var localNetBrowser: NetServiceBrowser?
 
   override func application(
     _ application: UIApplication,
@@ -18,6 +20,14 @@ import UIKit
         if call.method == "getInitialPdf" {
           result(self?.pendingPdfPath)
           self?.pendingPdfPath = nil
+        } else if call.method == "warmupLocalNetwork" {
+          // Dart 的 UDP 组播被系统静默拦截时不一定弹「本地网络」授权框；
+          // 用 Bonjour 浏览（类型须列在 Info.plist NSBonjourServices）可稳定触发
+          self?.localNetBrowser?.stop()
+          let browser = NetServiceBrowser()
+          browser.searchForServices(ofType: "_ssdp._udp.", inDomain: "local.")
+          self?.localNetBrowser = browser
+          result(nil)
         } else {
           result(FlutterMethodNotImplemented)
         }

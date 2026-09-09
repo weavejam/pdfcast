@@ -9,7 +9,7 @@ import 'still_mp4.dart';
 /// 本地 HTTP server：把 PDF 页面按需编成静态画面 H.264 MP4 给电视拉取。
 /// 走视频而非图片：实测有电视（YUPP 等 stagefright renderer）对 DLNA
 /// 图片投屏静默丢弃，但 H.264/MP4 稳定播放。
-/// URL 规则：`/d/<docId>/p/<page>-<mode>-<edge>.mp4`
+/// URL 规则：`/d/<docId>/p/<page>-<layout>-<quarterTurns>-<edge>.mp4`
 /// 参数全部编进路径（不用 query string，避免 & 在 DIDL/CurrentURI 里的
 /// 转义歧义）；任何参数变化 URL 必变——电视缓存激进，URL 唯一性是
 /// 换页正确显示的前提。
@@ -28,17 +28,19 @@ class PageServer {
 
   /// 启动（幂等）。返回 base url，如 http://192.168.1.5:38080
   Future<String> ensureStarted() async {
-    if (_server != null && _ip != null) {
-      return 'http://$_ip:${_server!.port}';
-    }
+    // 每次都重新取 IP：Wi-Fi 重连/切网后 IP 会变，用旧 IP 电视拉不到流
+    //（表现为电视一直转圈）。server 绑的是 anyIPv4，IP 变了无需重绑。
     final ip = await lanIPv4();
     if (ip == null) {
       throw Exception('未找到局域网 IP，请确认已连接 Wi-Fi');
     }
+    _ip = ip;
+    if (_server != null) {
+      return 'http://$ip:${_server!.port}';
+    }
     final server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
     server.listen(_handle, onError: (_) {});
     _server = server;
-    _ip = ip;
     return 'http://$ip:${server.port}';
   }
 
@@ -54,10 +56,11 @@ class PageServer {
   }
 
   /// 电视要拉的页面视频 URL。必须先 ensureStarted + serveDoc。
-  String pageUrl(int page, TvMode mode, {int longEdge = 1920}) {
+  String pageUrl(int page, TvLayout layout, int quarterTurns,
+      {int longEdge = 1920}) {
     final doc = _doc!;
     return 'http://$_ip:${_server!.port}'
-        '/d/${doc.id}/p/$page-${mode.name}-$longEdge.mp4';
+        '/d/${doc.id}/p/$page-${layout.name}-${quarterTurns & 3}-$longEdge.mp4';
   }
 
   Future<void> _handle(HttpRequest req) async {
@@ -76,19 +79,22 @@ class PageServer {
         return;
       }
       final parts = seg[3].substring(0, seg[3].length - 4).split('-');
-      if (parts.length != 3) {
+      if (parts.length != 4) {
         req.response.statusCode = HttpStatus.notFound;
         await req.response.close();
         return;
       }
       final page = int.parse(parts[0]);
-      final mode = TvMode.values.asNameMap()[parts[1]] ?? TvMode.fit;
-      final longEdge = double.tryParse(parts[2]) ?? 1920;
+      final layout =
+          TvLayout.values.asNameMap()[parts[1]] ?? TvLayout.single;
+      final quarterTurns = (int.tryParse(parts[2]) ?? 0) & 3;
+      final longEdge = double.tryParse(parts[3]) ?? 1920;
 
-      final key = '${doc.id}/$page/${mode.name}/$longEdge';
+      final key = '${doc.id}/$page/${layout.name}/$quarterTurns/$longEdge';
       var bytes = _cache.remove(key);
       if (bytes == null) {
-        final c = await composePageRgba(doc, page, mode, longEdge: longEdge);
+        final c = await composePageRgba(doc, page, layout, quarterTurns,
+            longEdge: longEdge);
         bytes = encodeStillMp4(
             rgba: c.rgba, width: c.width, height: c.height);
       }

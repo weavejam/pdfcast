@@ -23,7 +23,10 @@ class CastSession extends ChangeNotifier {
   bool ownsDoc = false;
   String docName = '';
   int page = 0;
-  TvMode mode = TvMode.fit;
+  TvLayout layout = TvLayout.single;
+
+  /// 顺时针旋转 90° 的次数（0~3），对应 0/90/180/270°
+  int quarterTurns = 0;
   int longEdge = 1920;
 
   bool pushing = false;
@@ -39,7 +42,7 @@ class CastSession extends ChangeNotifier {
   String get deviceName => _device?.info.friendlyName ?? '';
 
   /// 双页模式一次跨两页
-  int get _step => mode == TvMode.spread ? 2 : 1;
+  int get _step => layout == TvLayout.spread ? 2 : 1;
 
   void Function(int page)? onPageShown;
 
@@ -74,6 +77,10 @@ class CastSession extends ChangeNotifier {
     page = startPage;
     try {
       await _pushCurrent();
+    } on TimeoutException {
+      // 电视响应慢于超时但命令多半已生效（实测报超时后几秒画面照样出来）：
+      // 保留会话进遥控页，只在状态行提示，不当失败拆会话
+      lastError = '电视响应慢，画面可能稍后出现；没画面就点重试';
     } catch (e) {
       if (old == null) _teardownAwake();
       _device = null;
@@ -128,10 +135,25 @@ class CastSession extends ChangeNotifier {
     _schedulePush();
   }
 
-  void setMode(TvMode m) {
-    if (mode == m) return;
-    mode = m;
-    if (m == TvMode.spread) page -= page % 2; // 双页对齐到偶数页起
+  void setLayout(TvLayout l) {
+    if (layout == l) return;
+    layout = l;
+    if (l == TvLayout.spread) page -= page % 2; // 双页对齐到偶数页起
+    notifyListeners();
+    _schedulePush();
+  }
+
+  void setRotation(int quarters) {
+    final q = quarters & 3;
+    if (quarterTurns == q) return;
+    quarterTurns = q;
+    notifyListeners();
+    _schedulePush();
+  }
+
+  /// 手动重推当前页（推送失败/超时后的重试入口）
+  void repush() {
+    lastError = null;
     notifyListeners();
     _schedulePush();
   }
@@ -158,7 +180,8 @@ class CastSession extends ChangeNotifier {
     lastError = null;
     notifyListeners();
     try {
-      final url = PageServer.i.pageUrl(page, mode, longEdge: longEdge);
+      final url =
+          PageServer.i.pageUrl(page, layout, quarterTurns, longEdge: longEdge);
       await av.setVideoUri(url, '$docName 第${page + 1}页');
       // SetAVTransportURI 后紧接 Play 有电视会丢，稍等再发
       await Future.delayed(const Duration(milliseconds: 300));
