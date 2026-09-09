@@ -23,6 +23,17 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.4
 
 flutter:
   uses-material-design: true
+
+# dart run flutter_launcher_icons 重新生成各平台图标
+flutter_launcher_icons:
+  android: true
+  ios: true
+  remove_alpha_ios: true # ASC 拒绝带 alpha 通道的 1024 图标（ITMS-90717）
+  image_path: marketing/icon_raw.png
+  windows:
+    generate: true
+    icon_size: 256
