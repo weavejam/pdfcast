@@ -1,0 +1,101 @@
+name: iOS TestFlight
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  ipa:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        run: |
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XC" ]; then sudo xcode-select -s "$XC"; fi
+          xcodebuild -version
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter test
+      - run: flutter build ios --release --no-codesign --build-number ${{ github.run_number }}
+
+      - name: Write App Store Connect API key
+        run: |
+          mkdir -p ~/private_keys
+          printf '%s' "${{ secrets.ASC_KEY_P8 }}" > ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+
+      # 云托管签名每次在全新 runner 上都会新建开发证书（私钥随 runner 销毁），
+      # 攒满账号上限（约 10 个）后构建会报 "maximum number of certificates"。
+      # 每次构建前把之前 CI 生成的 "Created via API" 证书清掉。
+      - name: Revoke stale CI-created dev certificates
+        run: |
+          python3 -m venv /tmp/certclean
+          /tmp/certclean/bin/pip install --quiet 'pyjwt[crypto]' requests
+          /tmp/certclean/bin/python - <<'EOF'
+          import jwt, time, requests, os
+          key = open(os.path.expanduser('~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8')).read()
+          token = jwt.encode(
+              {"iss": "${{ secrets.ASC_ISSUER_ID }}", "iat": int(time.time()),
+               "exp": int(time.time()) + 1000, "aud": "appstoreconnect-v1"},
+              key, algorithm="ES256", headers={"kid": "${{ secrets.ASC_KEY_ID }}"})
+          h = {"Authorization": f"Bearer {token}"}
+          r = requests.get("https://api.appstoreconnect.apple.com/v1/certificates?limit=200", headers=h)
+          r.raise_for_status()
+          for c in r.json()["data"]:
+              if c["attributes"]["displayName"] == "Created via API":
+                  dr = requests.delete(f"https://api.appstoreconnect.apple.com/v1/certificates/{c['id']}", headers=h)
+                  print("revoked", c["id"], dr.status_code)
+          EOF
+
+      - name: Archive (cloud managed signing)
+        run: |
+          cd ios
+          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath build/Runner.xcarchive archive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
+            -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}" \
+            DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
+            CODE_SIGN_STYLE=Automatic
+
+      - name: Export IPA
+        run: |
+          cd ios
+          cat > ExportOptions.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>TEAM_ID_PLACEHOLDER</string>
+          </dict></plist>
+          EOF
+          sed -i '' "s/TEAM_ID_PLACEHOLDER/${{ secrets.APPLE_TEAM_ID }}/" ExportOptions.plist
+          xcodebuild -exportArchive -archivePath build/Runner.xcarchive \
+            -exportPath build/export -exportOptionsPlist ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
+            -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}"
+
+      - name: Upload to TestFlight
+        run: |
+          jq -n --arg kid "${{ secrets.ASC_KEY_ID }}" \
+                --arg iss "${{ secrets.ASC_ISSUER_ID }}" \
+                --rawfile key ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
+                '{key_id:$kid, issuer_id:$iss, key:$key, in_house:false}' > /tmp/asc_key.json
+          fastlane pilot upload --ipa ios/build/export/*.ipa \
+            --api_key_path /tmp/asc_key.json \
+            --skip_waiting_for_build_processing true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdfcast-ipa
+          path: ios/build/export/*.ipa

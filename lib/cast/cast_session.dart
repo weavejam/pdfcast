@@ -1,0 +1,228 @@
+import 'dart:async';
+
+import 'package:dlna_dart/dlna.dart';
+import 'package:dlna_dart/xmlParser.dart' show ImageMime;
+import 'package:flutter/cupertino.dart';
+
+import '../pdf/page_composer.dart';
+import '../pdf/pdf_doc.dart';
+import '../screen_awake.dart';
+import '../serve/page_server.dart';
+
+/// 全局投屏会话：持有设备与当前页，翻页 = 重新 SetAVTransportURI 推图片 URL。
+class CastSession extends ChangeNotifier {
+  CastSession._();
+  static final CastSession i = CastSession._();
+
+  DLNADevice? _device;
+  PdfDoc? doc;
+
+  /// 阅读页退出时若仍在投屏，把 doc 的释放责任移交给会话（stop 时 dispose）
+  bool ownsDoc = false;
+  String docName = '';
+  int page = 0;
+  TvMode mode = TvMode.fit;
+  int longEdge = 1920;
+
+  bool pushing = false;
+  String? lastError;
+
+  Timer? _autoTimer;
+  int autoIntervalSec = 8;
+  bool get autoFlipOn => _autoTimer != null;
+
+  Timer? _awakeTimer;
+
+  bool get active => _device != null;
+  String get deviceName => _device?.info.friendlyName ?? '';
+
+  /// 双页模式一次跨两页
+  int get _step => mode == TvMode.spread ? 2 : 1;
+
+  void Function(int page)? onPageShown;
+
+  Future<void> start(
+    DLNADevice device,
+    PdfDoc document,
+    String name,
+    int startPage,
+  ) async {
+    final base = await PageServer.i.ensureStarted();
+    debugPrint('PageServer at $base');
+    PageServer.i.serveDoc(document);
+    final old = _device;
+    if (old == null) {
+      ScreenAwake.acquire();
+      _awakeTimer =
+          Timer.periodic(const Duration(minutes: 1), (_) => ScreenAwake.refresh());
+    }
+    if (old != null && old != device) {
+      try {
+        await old.stop();
+      } catch (_) {}
+    }
+    _device = device;
+    if (ownsDoc && doc != null && !identical(doc, document)) {
+      doc!.dispose();
+    }
+    ownsDoc = false;
+    doc = document;
+    docName = name;
+    page = startPage;
+    try {
+      await _pushCurrent();
+    } catch (e) {
+      if (old == null) _teardownAwake();
+      _device = null;
+      doc = null;
+      notifyListeners();
+      rethrow;
+    }
+    notifyListeners();
+  }
+
+  Future<void> switchDevice(DLNADevice device) async {
+    final old = _device;
+    _device = device;
+    try {
+      await _pushCurrent();
+    } catch (e) {
+      _device = old;
+      rethrow;
+    } finally {
+      notifyListeners();
+    }
+    if (old != null && old != device) {
+      try {
+        await old.stop();
+      } catch (_) {}
+    }
+  }
+
+  // ---- 翻页 ----
+
+  bool get hasNext => doc != null && page + _step < doc!.pageCount;
+  bool get hasPrev => page > 0;
+
+  void next() {
+    if (hasNext) goTo(page + _step);
+  }
+
+  void prev() {
+    if (hasPrev) goTo((page - _step).clamp(0, doc!.pageCount - 1));
+  }
+
+  /// UI 先行显示目标页，推送节流：快速连翻只把最终停留页推给电视
+  void goTo(int target) {
+    final d = doc;
+    if (d == null) return;
+    page = target.clamp(0, d.pageCount - 1);
+    notifyListeners();
+    _schedulePush();
+  }
+
+  void setMode(TvMode m) {
+    if (mode == m) return;
+    mode = m;
+    if (m == TvMode.spread) page -= page % 2; // 双页对齐到偶数页起
+    notifyListeners();
+    _schedulePush();
+  }
+
+  int? _pendingPage;
+
+  void _schedulePush() {
+    if (!active) return;
+    if (pushing) {
+      _pendingPage = page;
+      return;
+    }
+    _pushCurrent().catchError((e) {
+      lastError = '推送失败：$e';
+      notifyListeners();
+    });
+  }
+
+  Future<void> _pushCurrent() async {
+    final device = _device;
+    final d = doc;
+    if (device == null || d == null) return;
+    pushing = true;
+    lastError = null;
+    notifyListeners();
+    try {
+      final url = PageServer.i.pageUrl(page, mode, longEdge: longEdge);
+      await device.setUrl(
+        url,
+        title: '$docName 第${page + 1}页',
+        type: ImageMime.png,
+      );
+      // 部分设备 SetAVTransportURI 后不自动显示，需要显式 Play
+      try {
+        await device.play();
+      } catch (_) {}
+      onPageShown?.call(page);
+    } finally {
+      pushing = false;
+      notifyListeners();
+      final pending = _pendingPage;
+      _pendingPage = null;
+      if (pending != null && pending != page) {
+        // 状态已过期（用户又翻了），推最新页
+        _schedulePush();
+      } else if (pending != null) {
+        await _pushCurrent();
+      }
+    }
+  }
+
+  // ---- 定时翻页 ----
+
+  void startAutoFlip(int intervalSec) {
+    autoIntervalSec = intervalSec;
+    _autoTimer?.cancel();
+    _autoTimer = Timer.periodic(Duration(seconds: intervalSec), (_) {
+      if (!hasNext) {
+        stopAutoFlip();
+        return;
+      }
+      next();
+    });
+    notifyListeners();
+  }
+
+  void stopAutoFlip() {
+    _autoTimer?.cancel();
+    _autoTimer = null;
+    notifyListeners();
+  }
+
+  // ---- 结束 ----
+
+  Future<void> stop() async {
+    final device = _device;
+    _device = null;
+    stopAutoFlip();
+    _teardownAwake();
+    _pendingPage = null;
+    lastError = null;
+    PageServer.i.clearDoc();
+    if (ownsDoc) {
+      doc?.dispose();
+      ownsDoc = false;
+    }
+    doc = null;
+    notifyListeners();
+    if (device != null) {
+      try {
+        await device.stop();
+      } catch (_) {}
+    }
+  }
+
+  void _teardownAwake() {
+    _awakeTimer?.cancel();
+    _awakeTimer = null;
+    ScreenAwake.release();
+  }
+}
