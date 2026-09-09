@@ -52,6 +52,11 @@
 	<string>本 App 不主动访问照片图库；仅文件选择组件依赖系统能力时按需使用。</string>
 	<key>NSCameraUsageDescription</key>
 	<string>本 App 不主动使用相机；仅因文件选择组件依赖而需声明。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>本 App 不主动获取位置；仅因依赖组件引用了定位 API 而需声明。</string>
+	<!-- 只用 HTTPS/系统加密，提前答复出口合规，TestFlight 不再每个 build 弹 Missing Compliance -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_ssdp._udp</string>
