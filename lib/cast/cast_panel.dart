@@ -5,6 +5,7 @@ import 'package:flutter/cupertino.dart';
 
 import '../pdf/pdf_doc.dart';
 import 'cast_session.dart';
+import 'ssdp_search.dart';
 
 /// 弹出投屏面板：搜索局域网 DLNA 设备，点选后把 [doc] 从 [startPage] 投出去。
 /// 投屏中再次打开可换设备或停止投屏。投屏成功后回调 [onCasting]。
@@ -44,6 +45,8 @@ class _CastSheet extends StatefulWidget {
 
 class _CastSheetState extends State<_CastSheet> {
   final DLNAManager _manager = DLNAManager();
+  final SsdpMultiInterfaceSearch _extraSearch = SsdpMultiInterfaceSearch();
+  DeviceManager? _fallbackDm;
   List<DLNADevice> _devices = const [];
   StreamSubscription? _sub;
   bool _connecting = false;
@@ -61,23 +64,32 @@ class _CastSheetState extends State<_CastSheet> {
   }
 
   Future<void> _search() async {
+    DeviceManager dm;
     try {
       // reusePort：B 站等 app 投屏时会占住 SSDP 的 1900 端口，必须共享绑定
-      final dm = await _manager.start(reusePort: true);
-      // devices 是单订阅流，每次打开面板都新建 DeviceManager，不能复用
-      _sub = dm.devices.stream.listen((map) {
-        if (mounted) setState(() => _devices = map.values.toList());
-      });
-    } catch (e) {
-      if (mounted) setState(() => _error = '搜索设备失败：$e');
+      // （Windows 不支持 reusePort，Dart 只打日志不报错，1900 被独占时才抛）
+      dm = await _manager.start(reusePort: true);
+    } catch (_) {
+      // 1900 绑不上（被其他投屏 app 独占）：收不到 NOTIFY 广播，但多网卡
+      // M-SEARCH 的回复走临时端口，照样能发现设备
+      dm = _fallbackDm = DeviceManager();
     }
+    // devices 是单订阅流，每次打开面板都新建 DeviceManager，不能复用
+    _sub = dm.devices.stream.listen((map) {
+      if (mounted) setState(() => _devices = map.values.toList());
+    });
+    // dlna_dart 的 M-SEARCH 只从系统默认组播出口发，遇到 WSL/虚拟网卡就发错口，
+    // 这里补一份按网卡逐个发的搜索（详见 ssdp_search.dart）
+    await _extraSearch.start(dm);
   }
 
   @override
   void dispose() {
     CastSession.i.removeListener(_onSession);
     _sub?.cancel();
+    _extraSearch.stop();
     _manager.stop();
+    _fallbackDm?.dispose();
     super.dispose();
   }
 
