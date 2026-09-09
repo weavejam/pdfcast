@@ -40,6 +40,7 @@ class CastSession extends ChangeNotifier {
 
   bool get active => _device != null;
   String get deviceName => _device?.info.friendlyName ?? '';
+  DLNADevice? get device => _device;
 
   /// 双页模式一次跨两页
   int get _step => layout == TvLayout.spread ? 2 : 1;

@@ -78,8 +78,17 @@ class _ReaderPageState extends State<ReaderPage> {
   Future<void> _cast() async {
     final doc = _doc;
     if (doc == null) return;
-    // 已在投本文档：不再弹设备面板，直接回遥控页
-    if (!(CastSession.i.active && CastSession.i.doc?.id == doc.id)) {
+    final session = CastSession.i;
+    if (session.active && session.doc?.id != doc.id) {
+      // 电视已连着，换文档直接投过去，不再弹设备面板（换设备入口在遥控页）
+      try {
+        await session.start(session.device!, doc, widget.name, _page);
+      } catch (_) {
+        // 直投失败（设备掉线等，会话已被拆掉），退回设备选择
+      }
+    }
+    if (!mounted) return;
+    if (!(session.active && session.doc?.id == doc.id)) {
       await showCastSheet(
         context,
         doc: doc,

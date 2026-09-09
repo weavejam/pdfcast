@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/cupertino.dart';
 
+import '../cast/cast_panel.dart';
 import '../cast/cast_session.dart';
 import '../pdf/page_composer.dart';
 import '../pdf/pdf_doc.dart';
@@ -112,11 +113,26 @@ class _RemotePageState extends State<RemotePage> {
       navigationBar: CupertinoNavigationBar(
         middle: Text('投屏到「${_session.deviceName}」',
             maxLines: 1, overflow: TextOverflow.ellipsis),
-        trailing: CupertinoButton(
-          padding: EdgeInsets.zero,
-          onPressed: _confirmStop,
-          child: const Text('断开',
-              style: TextStyle(color: CupertinoColors.destructiveRed)),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CupertinoButton(
+              padding: const EdgeInsets.only(right: 12),
+              onPressed: () => showCastSheet(
+                context,
+                doc: doc,
+                docName: _session.docName,
+                startPage: _session.page,
+              ),
+              child: const Text('换设备'),
+            ),
+            CupertinoButton(
+              padding: EdgeInsets.zero,
+              onPressed: _confirmStop,
+              child: const Text('断开',
+                  style: TextStyle(color: CupertinoColors.destructiveRed)),
+            ),
+          ],
         ),
       ),
       child: SafeArea(
