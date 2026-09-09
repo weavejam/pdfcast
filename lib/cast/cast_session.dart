@@ -1,20 +1,22 @@
 import 'dart:async';
 
 import 'package:dlna_dart/dlna.dart';
-import 'package:dlna_dart/xmlParser.dart' show ImageMime;
 import 'package:flutter/cupertino.dart';
 
 import '../pdf/page_composer.dart';
 import '../pdf/pdf_doc.dart';
 import '../screen_awake.dart';
 import '../serve/page_server.dart';
+import 'av_transport.dart';
 
-/// 全局投屏会话：持有设备与当前页，翻页 = 重新 SetAVTransportURI 推图片 URL。
+/// 全局投屏会话：持有设备与当前页，翻页 = 重新 SetAVTransportURI
+/// 推该页的静态画面 MP4 URL（图片投屏部分电视静默丢弃，视频稳）。
 class CastSession extends ChangeNotifier {
   CastSession._();
   static final CastSession i = CastSession._();
 
   DLNADevice? _device;
+  AvTransport? _av;
   PdfDoc? doc;
 
   /// 阅读页退出时若仍在投屏，把 doc 的释放责任移交给会话（stop 时 dispose）
@@ -58,10 +60,11 @@ class CastSession extends ChangeNotifier {
     }
     if (old != null && old != device) {
       try {
-        await old.stop();
+        await _av?.stop();
       } catch (_) {}
     }
     _device = device;
+    _av = AvTransport(device);
     if (ownsDoc && doc != null && !identical(doc, document)) {
       doc!.dispose();
     }
@@ -74,6 +77,7 @@ class CastSession extends ChangeNotifier {
     } catch (e) {
       if (old == null) _teardownAwake();
       _device = null;
+      _av = null;
       doc = null;
       notifyListeners();
       rethrow;
@@ -83,18 +87,21 @@ class CastSession extends ChangeNotifier {
 
   Future<void> switchDevice(DLNADevice device) async {
     final old = _device;
+    final oldAv = _av;
     _device = device;
+    _av = AvTransport(device);
     try {
       await _pushCurrent();
     } catch (e) {
       _device = old;
+      _av = oldAv;
       rethrow;
     } finally {
       notifyListeners();
     }
     if (old != null && old != device) {
       try {
-        await old.stop();
+        await oldAv?.stop();
       } catch (_) {}
     }
   }
@@ -144,23 +151,18 @@ class CastSession extends ChangeNotifier {
   }
 
   Future<void> _pushCurrent() async {
-    final device = _device;
+    final av = _av;
     final d = doc;
-    if (device == null || d == null) return;
+    if (av == null || d == null) return;
     pushing = true;
     lastError = null;
     notifyListeners();
     try {
       final url = PageServer.i.pageUrl(page, mode, longEdge: longEdge);
-      await device.setUrl(
-        url,
-        title: '$docName 第${page + 1}页',
-        type: ImageMime.png,
-      );
-      // 部分设备 SetAVTransportURI 后不自动显示，需要显式 Play
-      try {
-        await device.play();
-      } catch (_) {}
+      await av.setVideoUri(url, '$docName 第${page + 1}页');
+      // SetAVTransportURI 后紧接 Play 有电视会丢，稍等再发
+      await Future.delayed(const Duration(milliseconds: 300));
+      await av.play();
       onPageShown?.call(page);
     } finally {
       pushing = false;
@@ -200,8 +202,9 @@ class CastSession extends ChangeNotifier {
   // ---- 结束 ----
 
   Future<void> stop() async {
-    final device = _device;
+    final av = _av;
     _device = null;
+    _av = null;
     stopAutoFlip();
     _teardownAwake();
     _pendingPage = null;
@@ -213,9 +216,9 @@ class CastSession extends ChangeNotifier {
     }
     doc = null;
     notifyListeners();
-    if (device != null) {
+    if (av != null) {
       try {
-        await device.stop();
+        await av.stop();
       } catch (_) {}
     }
   }

@@ -316,6 +316,17 @@ class _PagePreview extends StatelessWidget {
     return FutureBuilder<Uint8List>(
       future: doc.renderPng(page, longEdge: 1200),
       builder: (_, snap) {
+        if (snap.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('预览失败：${snap.error}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: 12, color: CupertinoColors.destructiveRed)),
+            ),
+          );
+        }
         final bytes = snap.data;
         if (bytes == null) {
           return const Center(child: CupertinoActivityIndicator());

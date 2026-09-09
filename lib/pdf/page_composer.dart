@@ -18,8 +18,32 @@ enum TvMode {
   const TvMode(this.label);
 }
 
-/// 按电视模式把页面合成为最终投屏的 PNG
-Future<Uint8List> composePage(
+/// 合成结果的原始 RGBA 像素（供纯 Dart H.264 编码器使用）
+class ComposedRgba {
+  final Uint8List rgba;
+  final int width;
+  final int height;
+  ComposedRgba(this.rgba, this.width, this.height);
+}
+
+/// 按电视模式合成页面并输出 RGBA 像素（投屏走 MP4 编码，不经 PNG）
+Future<ComposedRgba> composePageRgba(
+  PdfDoc doc,
+  int page,
+  TvMode mode, {
+  double longEdge = 1920,
+}) async {
+  final image = await _composeImage(doc, page, mode, longEdge: longEdge);
+  try {
+    final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    return ComposedRgba(
+        data!.buffer.asUint8List(), image.width, image.height);
+  } finally {
+    image.dispose();
+  }
+}
+
+Future<ui.Image> _composeImage(
   PdfDoc doc,
   int page,
   TvMode mode, {
@@ -27,11 +51,11 @@ Future<Uint8List> composePage(
 }) async {
   switch (mode) {
     case TvMode.fit:
-      return doc.renderPng(page, longEdge: longEdge);
+      return doc.renderImage(page, longEdge: longEdge);
     case TvMode.rotate90:
       final img = await doc.renderImage(page, longEdge: longEdge);
       try {
-        return await _encode(_rotate90(img));
+        return await _rotate90(img);
       } finally {
         img.dispose();
       }
@@ -42,7 +66,7 @@ Future<Uint8List> composePage(
         right = await doc.renderImage(page + 1, longEdge: longEdge);
       }
       try {
-        return await _encode(_sideBySide(left, right));
+        return await _sideBySide(left, right);
       } finally {
         left.dispose();
         right?.dispose();
@@ -86,14 +110,4 @@ Future<ui.Image> _sideBySide(ui.Image left, ui.Image? right) {
     canvas.restore();
   }
   return rec.endRecording().toImage(w, h);
-}
-
-Future<Uint8List> _encode(Future<ui.Image> imageFuture) async {
-  final image = await imageFuture;
-  try {
-    final data = await image.toByteData(format: ui.ImageByteFormat.png);
-    return data!.buffer.asUint8List();
-  } finally {
-    image.dispose();
-  }
 }
