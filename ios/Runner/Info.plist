@@ -47,6 +47,11 @@
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>需要访问本地网络以发现同一 Wi-Fi 下的电视/投屏设备，并向其传送 PDF 页面画面。</string>
+	<!-- file_picker 引用了相册/相机 API，缺 purpose string 会在 TestFlight 处理阶段被拒（ITMS-90683），即使 App 不实际使用 -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>本 App 不主动访问照片图库；仅文件选择组件依赖系统能力时按需使用。</string>
+	<key>NSCameraUsageDescription</key>
+	<string>本 App 不主动使用相机；仅因文件选择组件依赖而需声明。</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_ssdp._udp</string>
