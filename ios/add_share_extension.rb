@@ -27,6 +27,8 @@ target.add_file_references([group.new_reference('ShareViewController.swift')])
 
 target.build_configurations.each do |c|
   bs = c.build_settings
+  # 不设的话产物名是空串「.appex」，archive 报 Multiple commands produce
+  bs['PRODUCT_NAME'] = '$(TARGET_NAME)'
   bs['PRODUCT_BUNDLE_IDENTIFIER'] = 'com.weavejam.pdfcast.share'
   bs['INFOPLIST_FILE'] = 'ShareExtension/Info.plist'
   bs['GENERATE_INFOPLIST_FILE'] = 'NO'
