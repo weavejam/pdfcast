@@ -16,6 +16,8 @@ class PdfDoc {
   PdfDoc._(this._doc, this.path, this.id);
 
   static Future<PdfDoc> open(String path) async {
+    // pdfrx 2.x：直接用 PdfDocument API（不经 PdfViewer/PdfDocumentRef）必须先初始化
+    await pdfrxFlutterInitialize();
     final doc = await PdfDocument.openFile(path);
     final f = File(path);
     final stat = f.statSync();
@@ -53,7 +55,7 @@ class PdfDoc {
       final img = await p.render(
         fullWidth: w.toDouble(),
         fullHeight: h.toDouble(),
-        backgroundColor: const ui.Color(0xFFFFFFFF),
+        backgroundColor: 0xFFFFFFFF,
       );
       if (img == null) {
         throw Exception('渲染第 ${page + 1} 页失败');
