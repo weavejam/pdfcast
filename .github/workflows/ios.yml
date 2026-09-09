@@ -29,6 +29,14 @@ jobs:
       # 这里只生成 Generated.xcconfig，真正编译交给下面带云托管签名的 archive
       - run: flutter build ios --release --no-codesign --config-only --build-number ${{ github.run_number }}
 
+      # 本地没有 Mac，ShareExtension target 不进仓库的 pbxproj，构建前用
+      # xcodeproj gem 动态注入（幂等；xcodeproj 是 CocoaPods 的依赖，runner 一般自带）
+      - name: Inject Share Extension target
+        run: |
+          cd ios
+          ruby -e 'require "xcodeproj"' 2>/dev/null || sudo gem install xcodeproj --no-document
+          ruby add_share_extension.rb
+
       - name: Write App Store Connect API key
         run: |
           mkdir -p ~/private_keys

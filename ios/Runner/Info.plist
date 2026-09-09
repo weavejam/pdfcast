@@ -61,6 +61,18 @@
 	<array>
 		<string>_ssdp._udp</string>
 	</array>
+	<!-- Share Extension 导入完成后经此 scheme 唤起主 App -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.weavejam.pdfcast</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>pdfcast</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>

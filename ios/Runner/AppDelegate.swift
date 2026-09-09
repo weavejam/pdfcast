@@ -20,6 +20,8 @@ import UIKit
         if call.method == "getInitialPdf" {
           result(self?.pendingPdfPath)
           self?.pendingPdfPath = nil
+        } else if call.method == "takePendingImports" {
+          result(self?.takePendingImports() ?? [])
         } else if call.method == "warmupLocalNetwork" {
           // Dart 的 UDP 组播被系统静默拦截时不一定弹「本地网络」授权框；
           // 用 Bonjour 浏览（类型须列在 Info.plist NSBonjourServices）可稳定触发
@@ -47,6 +49,8 @@ import UIKit
     open url: URL,
     options: [UIApplication.OpenURLOptionsKey: Any] = [:]
   ) -> Bool {
+    // Share Extension 唤起：文件已放进 App Group 共享容器，Dart 回前台时自取
+    if url.scheme == "pdfcast" { return true }
     guard let path = importedPath(from: url) else { return false }
     if let ch = channel {
       ch.invokeMethod("onPdf", arguments: path)
@@ -54,6 +58,26 @@ import UIKit
       pendingPdfPath = path
     }
     return true
+  }
+
+  // Share Extension 写进 App Group 共享容器 Inbox 的 PDF：挪到 tmp 交给 Dart。
+  // 由 Dart 在启动/回前台时主动调用，避免 native 推送在 Flutter 就绪前丢消息。
+  private func takePendingImports() -> [String] {
+    guard let container = FileManager.default.containerURL(
+      forSecurityApplicationGroupIdentifier: "group.com.weavejam.pdfcast") else { return [] }
+    let inbox = container.appendingPathComponent("Inbox", isDirectory: true)
+    guard let files = try? FileManager.default.contentsOfDirectory(
+      at: inbox, includingPropertiesForKeys: nil) else { return [] }
+    var out: [String] = []
+    for f in files where f.pathExtension.lowercased() == "pdf" {
+      let tmp = FileManager.default.temporaryDirectory
+        .appendingPathComponent("shared-\(Int(Date().timeIntervalSince1970 * 1000))-\(f.lastPathComponent)")
+      try? FileManager.default.removeItem(at: tmp)
+      if (try? FileManager.default.moveItem(at: f, to: tmp)) != nil {
+        out.append(tmp.path)
+      }
+    }
+    return out
   }
 
   private func importedPath(from url: URL) -> String? {
