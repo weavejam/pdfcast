@@ -2,6 +2,11 @@ name: iOS TestFlight
 
 on:
   workflow_dispatch:
+    inputs:
+      with_share_extension:
+        description: '注入 Share Extension（需先在开发者门户注册 App Group group.com.weavejam.pdfcast 并给两个 App ID 开 App Groups）'
+        type: boolean
+        default: false
   push:
     tags: ['v*']
 
@@ -32,6 +37,7 @@ jobs:
       # 本地没有 Mac，ShareExtension target 不进仓库的 pbxproj，构建前用
       # xcodeproj gem 动态注入（幂等；xcodeproj 是 CocoaPods 的依赖，runner 一般自带）
       - name: Inject Share Extension target
+        if: ${{ inputs.with_share_extension }}
         run: |
           cd ios
           ruby -e 'require "xcodeproj"' 2>/dev/null || sudo gem install xcodeproj --no-document

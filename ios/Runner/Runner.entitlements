@@ -4,9 +4,13 @@
 <dict>
 	<key>com.apple.developer.networking.multicast</key>
 	<true/>
+	<!-- App Group 需在开发者门户注册后才能签名（公开 ASC API 不支持创建 App Group），
+	     未就绪前不放进主 App entitlements，否则云托管签名 profile 不匹配、整个 build 失败。
+	     Share Extension 一并暂缓（见 .github/workflows/ios.yml 的 with_share_extension 开关）。
 	<key>com.apple.security.application-groups</key>
 	<array>
 		<string>group.com.weavejam.pdfcast</string>
 	</array>
+	-->
 </dict>
 </plist>
