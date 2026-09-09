@@ -26,7 +26,7 @@ jobs:
       - run: flutter test
       # SPM 集成的新项目上 --no-codesign 也会触发签名检查而失败，
       # 这里只生成 Generated.xcconfig，真正编译交给下面带云托管签名的 archive
-      - run: flutter build ios --release --config-only --build-number ${{ github.run_number }}
+      - run: flutter build ios --release --no-codesign --config-only --build-number ${{ github.run_number }}
 
       - name: Write App Store Connect API key
         run: |
