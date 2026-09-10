@@ -90,6 +90,21 @@ jobs:
             DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
             CODE_SIGN_STYLE=Automatic
 
+      # 诊断：archive 失败时把云签名实际取回的 profile 解码出来，
+      # 看它到底有没有 application-groups、值是什么
+      - name: Dump fetched provisioning profiles
+        if: always()
+        run: |
+          DIR=~/Library/Developer/Xcode/UserData/Provisioning\ Profiles
+          ls -la "$DIR" 2>/dev/null || echo "no profiles dir at $DIR"
+          for f in "$DIR"/*.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision; do
+            [ -f "$f" ] || continue
+            echo "===== $f"
+            security cms -D -i "$f" 2>/dev/null > /tmp/p.plist || continue
+            /usr/libexec/PlistBuddy -c 'Print :Name' /tmp/p.plist 2>/dev/null
+            /usr/libexec/PlistBuddy -c 'Print :Entitlements' /tmp/p.plist 2>/dev/null | head -40
+          done
+
       - name: Export IPA
         run: |
           cd ios
