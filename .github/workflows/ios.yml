@@ -71,13 +71,6 @@ jobs:
                   print("revoked", c["id"], dr.status_code)
           EOF
 
-      # 新增 App Groups 后逼云签名重建含 App Group 的托管 profile（见脚本头注释）
-      - name: Reset stale managed provisioning profiles
-        run: |
-          /tmp/certclean/bin/pip install --quiet 'pyjwt[crypto]' requests
-          /tmp/certclean/bin/python ios/ci_reset_managed_profiles.py \
-            "${{ secrets.ASC_KEY_ID }}" "${{ secrets.ASC_ISSUER_ID }}" com.weavejam.pdfcast
-
       - name: Archive (cloud managed signing)
         run: |
           cd ios
@@ -90,8 +83,10 @@ jobs:
             DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
             CODE_SIGN_STYLE=Automatic
 
-      # 诊断：archive 失败时把云签名实际取回的 profile 解码出来，
-      # 看它到底有没有 application-groups、值是什么
+      # 常驻诊断：把云签名实际取回的 profile 解码出来，看 entitlements 到底带了什么。
+      # 排查签名问题时这是唯一可靠依据——开发者门户页面显示的 "Enabled App Groups (N)"
+      # 可能是未落库的假状态（Save 后还有一个 "Modify App Capabilities" 确认弹窗），
+      # 而 ASC API 完全查不到 App Group 分配（无 /v1/appGroups 端点，settings 恒 null）。
       - name: Dump fetched provisioning profiles
         if: always()
         run: |
