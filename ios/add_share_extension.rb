@@ -51,5 +51,28 @@ embed.symbol_dst_subfolder_spec = :plug_ins
 bf = embed.add_file_reference(target.product_reference)
 bf.settings = { 'ATTRIBUTES' => ['RemoveHeadersOnCopy'] }
 
+# Flutter 的 'Thin Binary' 脚本阶段没声明 input/output，Xcode 新构建系统会把它与
+# 追加在最后的 Embed App Extensions 判成循环依赖：
+#   error: Cycle inside Runner; building could produce unreliable results.
+#   This usually can be resolved by moving the shell script phase 'Thin Binary'
+#   so that it runs before the build phase that depends on its outputs.
+# 把 Embed App Extensions 挪到 Thin Binary 之前即可。
+phases = runner.build_phases
+thin_idx = phases.index { |p| p.respond_to?(:name) && p.name.to_s.include?('Thin Binary') }
+embed_idx = phases.index(embed)
+if thin_idx && embed_idx && embed_idx > thin_idx
+  if phases.respond_to?(:move)
+    phases.move(embed, thin_idx)
+    puts "moved 'Embed App Extensions' to index #{thin_idx} (before 'Thin Binary')"
+  else
+    warn "WARNING: build_phases has no #move; embed stays after Thin Binary (cycle risk)"
+  end
+end
+puts 'Runner build phases order:'
+runner.build_phases.each_with_index do |p, i|
+  label = p.respond_to?(:name) && p.name ? p.name : p.class.name
+  puts "  #{i}: #{label}"
+end
+
 project.save
 puts "ShareExtension target injected (version #{build_name}+#{build_number}, iOS #{deploy})"
